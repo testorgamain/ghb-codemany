@@ -1,0 +1,188 @@
+# bench — the same pinned open-source builds on GitHub-hosted runners and on Codemany
+# runners, every night (2026-10-30).
+#
+# SAFETY: this public repo has self-hosted runners, so the ONLY triggers are `schedule`
+# and `workflow_dispatch`. Never add pull_request / pull_request_target / issue_comment /
+# push-from-fork triggers: they would let anyone run code on the Codemany machines.
+#
+# Shape: `plan` turns data/projects.json into matrices, then four bench jobs run
+# project × mode (GitHub: cold, then warm). Codemany jobs run one at a time (max-parallel: 1) so every measured
+# build gets the whole machine, exactly like a fresh GitHub VM does.
+# Every bench job has ONE step named `build`: that step's time is the headline number
+# (scripts/collect.mjs reads it). Job names are `<project> · <side> · <mode>`.
+# A warm job counts only if its `cache hit` step ran (2026-11-02, scripts/lib/cache-hit.mjs).
+# Waiting (2026-11-03): collect.mjs keeps each job's created → started time (queueSec).
+# Codemany's jobs here wait their turn (max-parallel: 1), so their wait includes earlier jobs.
+#
+# Cold honesty (2026-11-03, scripts/check-cold.mjs runs first in `plan`): a cold job never
+# restores anything, setup-* caches are off, keys carry the run id with no restore-keys, the
+# Android SDK starts empty on both sides and cold Docker builders skip Codemany's local
+# Docker Hub mirror. What a Codemany machine still keeps between jobs (tool cache, Docker
+# images in its daemon, its job cache) is machine state, said plainly in the README.
+#
+# Saved files (2026-11-02, BENCH_CACHE_SCOPE=run, scripts/env.sh): each project's cold job
+# saves its cache folder to GitHub's cache service; its warm job in the SAME run restores
+# it, deletes the entry and builds. Same on both sides. Nightly keys for both sides
+# (~14 GB) overflowed GitHub's 10 GB per repo and pushed each other out, so warm jobs
+# missed. GitHub's warm jobs wait for all its cold jobs; on Codemany (one job at a time)
+# each project's cold job runs right before its warm one (scripts/plan.sh order), except
+# Docker projects (2026-11-07, CMY-99): their cold jobs end the codemany-linux matrix and
+# their warm jobs run in codemany-linux-late, so re-running a refused cold job re-runs
+# its warm job too. A warm job with no saved files fails before `build` (prepare).
+name: bench-ours
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BENCH_CACHE_SCOPE: run
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write   # sweep old cache entries
+    outputs:
+      github_cold: ${{ steps.plan.outputs.github_cold }}
+      github_warm: ${{ steps.plan.outputs.github_warm }}
+      linux: ${{ steps.plan.outputs.linux }}
+      linux_late: ${{ steps.plan.outputs.linux_late }}
+      macos: ${{ steps.plan.outputs.macos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 2026-11-03: stop before any build if a cache could warm a cold build on one side
+      # only (Codemany keeps its own job cache, which the sweep below can't empty).
+      - name: check cold
+        run: node scripts/check-cold.mjs
+      - id: plan
+        run: bash scripts/plan.sh data/projects.json >> "$GITHUB_OUTPUT"
+      # 2026-11-02: start every run with an empty cache (only one bench run at a time:
+      # `concurrency`). Removes leftovers of failed runs and the old nightly entries.
+      - name: sweep caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list -R "$GITHUB_REPOSITORY" --key bench- --limit 1000 --json key --jq '.[].key' |
+            while IFS= read -r key; do gh cache delete -R "$GITHUB_REPOSITORY" "$key" || true; done
+
+  github-cold:
+    name: ${{ matrix.project }} · github · ${{ matrix.mode }}
+    needs: plan
+    # 2026-11-02: macos-26 (not -latest): its default Xcode is 26.6, the one every Mac job
+    # pins below, so the image can't move under the bench.
+    runs-on: ${{ matrix.os == 'macos' && 'macos-26' || 'ci-metal-4' }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.github_cold) }}
+    env:
+      BENCH_PROJECT: ${{ matrix.project }}
+      BENCH_MODE: ${{ matrix.mode }}
+      BENCH_SIDE: github
+      # 2026-11-02: the same Xcode as the codemany-macos job (see there); empty on Linux.
+      DEVELOPER_DIR: ${{ matrix.os == 'macos' && '/Applications/Xcode_26.6.app/Contents/Developer' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: bench
+          persist-credentials: false
+      - name: prepare
+        uses: ./bench/.github/actions/prepare
+        with:
+          repo: ${{ matrix.repo }}
+          sha: ${{ matrix.sha }}
+          lang: ${{ matrix.lang }}
+          toolchain: ${{ matrix.toolchain }}
+      # 2026-11-02: marker for scripts/lib/cache-hit.mjs: this step runs (success) only when
+      # a warm job really restored its cold job's cache; skipped = no restore, not "warm".
+      - name: cache hit
+        if: matrix.mode == 'warm' && env.BENCH_CACHE_HIT == 'true'
+        run: echo "restored $BENCH_CACHE_KEY"
+      - name: build
+        working-directory: src
+        run: bash ../bench/scripts/build.sh
+      # 2026-11-05: untimed, after `build`: write cold's Docker layers to the saved files
+      # for warm (scripts/docker-cache-export.sh). Same step on every side.
+      - name: export docker cache
+        if: matrix.mode == 'cold' && matrix.lang == 'Docker'
+        working-directory: src
+        run: bash ../bench/scripts/docker-cache-export.sh
+      # Cold only (2026-11-02): save for this run's warm job (GitHub's cache service).
+      - name: save cache
+        if: matrix.mode == 'cold'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.BENCH_CACHE_PATH }}   # relative per run (scripts/env.sh)
+          key: ${{ env.BENCH_CACHE_KEY }}
+      - name: cleanup
+        if: always()
+        run: bash bench/scripts/cleanup.sh
+
+  github-warm:
+    name: ${{ matrix.project }} · github · ${{ matrix.mode }}
+    # Restores the saves of github-cold; runs even when some cold jobs failed (their warm
+    # jobs then miss and do not count).
+    needs: [plan, github-cold]
+    permissions:
+      contents: read
+      actions: write   # delete the restored cache entry (prepare)
+    # 2026-11-02: macos-26 (not -latest): its default Xcode is 26.6, the one every Mac job
+    # pins below, so the image can't move under the bench.
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ${{ matrix.os == 'macos' && 'macos-26' || 'ci-metal-4' }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.github_warm) }}
+    env:
+      BENCH_PROJECT: ${{ matrix.project }}
+      BENCH_MODE: ${{ matrix.mode }}
+      BENCH_SIDE: github
+      # 2026-11-02: the same Xcode as the codemany-macos job (see there); empty on Linux.
+      DEVELOPER_DIR: ${{ matrix.os == 'macos' && '/Applications/Xcode_26.6.app/Contents/Developer' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: bench
+          persist-credentials: false
+      - name: prepare
+        uses: ./bench/.github/actions/prepare
+        with:
+          repo: ${{ matrix.repo }}
+          sha: ${{ matrix.sha }}
+          lang: ${{ matrix.lang }}
+          toolchain: ${{ matrix.toolchain }}
+      # 2026-11-02: marker for scripts/lib/cache-hit.mjs: this step runs (success) only when
+      # a warm job really restored its cold job's cache; skipped = no restore, not "warm".
+      - name: cache hit
+        if: matrix.mode == 'warm' && env.BENCH_CACHE_HIT == 'true'
+        run: echo "restored $BENCH_CACHE_KEY"
+      - name: build
+        working-directory: src
+        run: bash ../bench/scripts/build.sh
+      # 2026-11-05: untimed, after `build`: write cold's Docker layers to the saved files
+      # for warm (scripts/docker-cache-export.sh). Same step on every side.
+      - name: export docker cache
+        if: matrix.mode == 'cold' && matrix.lang == 'Docker'
+        working-directory: src
+        run: bash ../bench/scripts/docker-cache-export.sh
+      # Cold only (2026-11-02): save for this run's warm job (GitHub's cache service).
+      - name: save cache
+        if: matrix.mode == 'cold'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.BENCH_CACHE_PATH }}   # relative per run (scripts/env.sh)
+          key: ${{ env.BENCH_CACHE_KEY }}
+      - name: cleanup
+        if: always()
+        run: bash bench/scripts/cleanup.sh

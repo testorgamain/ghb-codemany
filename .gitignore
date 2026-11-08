@@ -1,0 +1,5 @@
+# Local junk only (2026-10-30). data/, charts/ and README.md are committed by the collector.
+node_modules/
+.DS_Store
+*.log
+/tmp/

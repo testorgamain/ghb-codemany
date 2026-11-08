@@ -1,0 +1,4 @@
+# actionlint config (2026-10-30): the Codemany self-hosted runner label.
+self-hosted-runner:
+  labels:
+    - codemany

@@ -1,0 +1,118 @@
+[
+  {
+    "id": "ripgrep",
+    "name": "ripgrep",
+    "repo": "BurntSushi/ripgrep",
+    "sha": "91f5d22ef48bde459d90a8c7dbeab416e97d0f2b",
+    "lang": "Rust",
+    "os": "linux",
+    "command": "cargo build --release",
+    "url": "https://github.com/BurntSushi/ripgrep",
+    "toolchain": "1.96.0"
+  },
+  {
+    "id": "hugo",
+    "name": "Hugo",
+    "repo": "gohugoio/hugo",
+    "sha": "8502b60066b1059c0e24275ef8a3b642b1b2a10b",
+    "lang": "Go",
+    "os": "linux",
+    "command": "go install",
+    "url": "https://github.com/gohugoio/hugo",
+    "toolchain": "go.mod"
+  },
+  {
+    "id": "react-dev",
+    "name": "react.dev",
+    "repo": "reactjs/react.dev",
+    "sha": "0821e7d9428a6c58c922765b891bbffba9ed6249",
+    "lang": "Next.js",
+    "os": "linux",
+    "command": "yarn install --frozen-lockfile && next build",
+    "url": "https://github.com/reactjs/react.dev",
+    "toolchain": "20.x"
+  },
+  {
+    "id": "excalidraw",
+    "name": "Excalidraw",
+    "repo": "excalidraw/excalidraw",
+    "sha": "a758e93d6a03e9f995973703cb886850a398a6d3",
+    "lang": "Docker",
+    "os": "linux",
+    "command": "docker build -t excalidraw .",
+    "url": "https://github.com/excalidraw/excalidraw",
+    "toolchain": "buildx"
+  },
+  {
+    "id": "typescript",
+    "name": "TypeScript 7 compiler",
+    "repo": "microsoft/TypeScript",
+    "sha": "6161772c1370bdd4a82f808e6823bd755eb1870d",
+    "lang": "Node.js",
+    "os": "linux",
+    "command": "npm ci && npx hereby build",
+    "url": "https://github.com/microsoft/TypeScript",
+    "toolchain": "24.22.1",
+    "trial": true
+  },
+  {
+    "id": "ruff",
+    "name": "Ruff",
+    "repo": "astral-sh/ruff",
+    "sha": "049c351befba87447d3d50a2ee3d617ce3c2a264",
+    "lang": "Rust",
+    "os": "linux",
+    "command": "cargo build --release --locked --bin ruff",
+    "url": "https://github.com/astral-sh/ruff",
+    "toolchain": "1.99.0",
+    "trial": true
+  },
+  {
+    "id": "django",
+    "name": "Django tests",
+    "repo": "django/django",
+    "sha": "a05e16a7230fe33d3f43f4a3aaed103cebb42efc",
+    "lang": "Python",
+    "os": "linux",
+    "command": "pip install -r tests/requirements/py3-free-threading.txt -e . && python -Wall tests/runtests.py",
+    "url": "https://github.com/django/django",
+    "toolchain": "3.15t",
+    "trial": true
+  },
+  {
+    "id": "kubernetes",
+    "name": "Kubernetes (kubectl)",
+    "repo": "kubernetes/kubernetes",
+    "sha": "aa8de068063335aee4a78589ee0d5c70b448e266",
+    "lang": "Go",
+    "os": "linux",
+    "command": "make WHAT=cmd/kubectl",
+    "url": "https://github.com/kubernetes/kubernetes",
+    "toolchain": ".go-version",
+    "trial": true
+  },
+  {
+    "id": "nowinandroid",
+    "name": "Now in Android",
+    "repo": "android/nowinandroid",
+    "sha": "2982e63cb691ad49cd009aab43dc206fee6699c2",
+    "lang": "Android",
+    "os": "linux",
+    "command": "./gradlew :app:assemble -PminifyWithR8=false",
+    "url": "https://github.com/android/nowinandroid",
+    "toolchain": "21",
+    "trial": true
+  },
+  {
+    "id": "neovim",
+    "name": "Neovim",
+    "repo": "neovim/neovim",
+    "sha": "2fc7032df9e7b7e4d625cc205a5ff9cdb0f02b27",
+    "lang": "C",
+    "os": "linux",
+    "command": "cmake --preset ci -D CMAKE_BUILD_TYPE=Release && cmake --build build",
+    "url": "https://github.com/neovim/neovim",
+    "toolchain": "cmake",
+    "trial": true
+  }
+]

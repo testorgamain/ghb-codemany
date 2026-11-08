@@ -1,0 +1,82 @@
+{
+  "codemany": [
+    {
+      "id": "codemany-linux-01",
+      "name": "Mini PC",
+      "os": "linux",
+      "cpu": "AMD Ryzen 7 8745H (8 cores / 16 threads)",
+      "cores": 8,
+      "ramGB": 32,
+      "diskGB": 1000,
+      "priceUSD": null,
+      "lifeYears": 3,
+      "watts": null,
+      "buyUrl": "https://www.amazon.com/dp/B0DRVSK2T9",
+      "buyNote": "MINISFORUM UM870, 32 GB, 1 TB"
+    },
+    {
+      "id": "codemany-mac-01",
+      "name": "Mac mini",
+      "os": "macos",
+      "cpu": "Apple silicon, 12 cores (Mac18,5)",
+      "cores": 12,
+      "ramGB": 16,
+      "diskGB": 256,
+      "priceUSD": null,
+      "lifeYears": 3,
+      "watts": null,
+      "buyUrl": "https://www.amazon.com/dp/B0HGGJZ92H",
+      "buyNote": "M6, 16 GB, 256 GB"
+    }
+  ],
+  "github": [
+    {
+      "label": "ubuntu-latest",
+      "code": "private",
+      "cpu": "2 vCPU (x64)",
+      "ramGB": 7,
+      "diskGB": 14,
+      "perMinuteUSD": 0.006,
+      "priceNote": "Private code gets a 2-core Linux computer. It costs $0.006 a minute.",
+      "source": "https://docs.github.com/en/billing/reference/actions-runner-pricing",
+      "specsSource": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+      "asOf": "2026-11-01"
+    },
+    {
+      "label": "macos-latest",
+      "code": "private",
+      "cpu": "3 vCPU (Apple M1)",
+      "ramGB": 7,
+      "diskGB": 14,
+      "perMinuteUSD": 0.062,
+      "priceNote": "Private code gets a 3-core Mac. It costs $0.062 a minute.",
+      "source": "https://docs.github.com/en/billing/reference/actions-runner-pricing",
+      "specsSource": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+      "asOf": "2026-11-01"
+    },
+    {
+      "label": "ubuntu-latest",
+      "code": "public",
+      "cpu": "4 vCPU (x64)",
+      "ramGB": 16,
+      "diskGB": 14,
+      "perMinuteUSD": 0,
+      "priceNote": "Public code gets a bigger 4-core Linux computer. It is free.",
+      "source": "https://docs.github.com/en/billing/reference/actions-runner-pricing",
+      "specsSource": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+      "asOf": "2026-11-01"
+    },
+    {
+      "label": "macos-latest",
+      "code": "public",
+      "cpu": "3 vCPU (Apple M1)",
+      "ramGB": 7,
+      "diskGB": 14,
+      "perMinuteUSD": 0,
+      "priceNote": "Public code gets the same 3-core Mac. It is free.",
+      "source": "https://docs.github.com/en/billing/reference/actions-runner-pricing",
+      "specsSource": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+      "asOf": "2026-11-01"
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+# prepare — everything before the measured `build` step (2026-10-30).
+# 1. fresh checkout of the pinned project into ./src (fresh files on BOTH sides)
+# 2. the same toolchain version on both sides
+# 3. every cache pointed at ONE folder, $BENCH_CACHE (scripts/env.sh):
+#    cold → an empty folder; warm → the saved folder, restored from GitHub's cache
+#    service on both sides (2026-11-02: a public repo's Codemany job runs on a wiped
+#    machine, so nothing from an earlier job is on its disk; see scripts/env.sh).
+#    2026-11-03: on codemany-linux-01 actions/cache is served by Codemany's own job cache
+#    (this machine's disk, then GCS), not GitHub's. Cold jobs never restore, keys carry the
+#    run id and there are no restore-keys, so a run only ever reads its own saves.
+#    scripts/check-cold.sh (plan job) fails the run if a cache could warm a cold build.
+#    bench.yml (BENCH_CACHE_SCOPE=run): the cold job of the same run saved it, and the
+#    warm job deletes the entry once restored, so both sides fit GitHub's 10 GB.
+# Reads BENCH_PROJECT / BENCH_MODE / BENCH_SIDE from the job env.
+name: prepare
+description: Check out a pinned project, set up its toolchain and wire its caches.
+inputs:
+  repo:
+    description: owner/name of the project
+    required: true
+  sha:
+    description: full commit SHA to build
+    required: true
+  lang:
+    description: Rust | Go | Next.js | Node.js | Python | Docker | Swift | iOS | Android | C
+    required: true
+  toolchain:
+    description: toolchain version (see data/projects.json)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: fresh source folder
+      shell: bash
+      run: rm -rf "${GITHUB_WORKSPACE:?}/src"
+
+    # 2026-11-02: every Mac job builds with the Xcode its job pins in DEVELOPER_DIR
+    # (bench.yml). Stop at once, saying which, when this Mac doesn't have it yet,
+    # instead of building with another Xcode or failing deep in xcodebuild.
+    - name: xcode check
+      if: inputs.lang == 'Swift' || inputs.lang == 'iOS'
+      shell: bash
+      run: |
+        if [[ -z "${DEVELOPER_DIR:-}" || ! -x "$DEVELOPER_DIR/usr/bin/xcodebuild" ]]; then
+          echo "::error::the pinned Xcode is not on this Mac: DEVELOPER_DIR='${DEVELOPER_DIR:-}'"
+          exit 1
+        fi
+        xcodebuild -version
+
+    - name: checkout project
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ${{ inputs.repo }}
+        ref: ${{ inputs.sha }}
+        path: src
+        persist-credentials: false
+
+    - name: rust toolchain
+      if: inputs.lang == 'Rust'
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      # 2026-10-30: a Codemany machine may have no rustup (it isn't a Codemany add-on),
+      # so install it once into a per-user folder (no sudo), kept for later nights.
+      run: |
+        if ! command -v rustup >/dev/null; then
+          export RUSTUP_HOME="$HOME/.cache/codemany-bench/rustup" CARGO_HOME="$HOME/.cache/codemany-bench/cargo-bin"
+          [ -x "$CARGO_HOME/bin/rustup" ] || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          export PATH="$CARGO_HOME/bin:$PATH"
+        fi
+        rustup toolchain install "$TOOLCHAIN" --profile minimal --no-self-update
+
+    - name: go toolchain
+      if: inputs.lang == 'Go'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: src/${{ inputs.toolchain }}   # go.mod, or .go-version (Kubernetes pins its exact Go there)
+        cache: false
+
+    - name: node toolchain
+      if: inputs.lang == 'Next.js' || inputs.lang == 'Node.js'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.toolchain }}
+        package-manager-cache: false
+
+    # 2026-11-01: TypeScript 7 is the Go port: its own .github/actions/setup-go installs
+    # Microsoft's Go build (1.27, resolved to 1.27.3 in its CI on 2026-10-30).
+    - name: go toolchain (TypeScript)
+      if: inputs.lang == 'Node.js'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.27.3'
+        go-download-base-url: https://aka.ms/golang/release/latest
+        cache: false
+
+    # 2026-11-01: Django's own Linux SQLite job runs free-threaded Python 3.15t (tests.yml).
+    - name: python toolchain
+      if: inputs.lang == 'Python'
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ inputs.toolchain }}
+        allow-prereleases: true
+
+    # 2026-11-01: Firefox for iOS's bootstrap.sh runs npm install + a webpack build.
+    - name: node for the iOS bootstrap
+      if: inputs.lang == 'iOS'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+        package-manager-cache: false
+
+    # 2026-11-01: Now in Android's CI uses Zulu JDK 21 (Build.yaml:33-37).
+    - name: java toolchain
+      if: inputs.lang == 'Android'
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        distribution: zulu
+        java-version: ${{ inputs.toolchain }}
+
+    # 2026-11-03 (honesty): an EMPTY Android SDK folder for this job, on BOTH sides. GitHub's
+    # image ships an SDK with platforms already in it, and a Codemany machine has none, so
+    # the build used to download its compile platform only on Codemany. Now both sides get
+    # platform-tools here, and the Android Gradle plugin downloads the compile platform
+    # during the build on both sides. $RUNNER_TEMP is emptied after every job (runner).
+    - name: android sdk folder
+      if: inputs.lang == 'Android'
+      shell: bash
+      run: |
+        sdk="$RUNNER_TEMP/android-sdk"; rm -rf "$sdk"; mkdir -p "$sdk"
+        { echo "ANDROID_HOME=$sdk"; echo "ANDROID_SDK_ROOT=$sdk"; } >> "$GITHUB_ENV"
+    - name: android sdk
+      if: inputs.lang == 'Android'
+      uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      with:
+        packages: 'platform-tools'   # 2026-11-01: 'platforms;android-37' isn't in the SDK repo; the Android Gradle plugin
+                                       # fetches the platform the project needs itself (as its own CI does), on both sides alike
+        log-accepted-android-sdk-licenses: false
+
+    # 2026-11-01: the same CMake and Ninja on both sides, in user space (no sudo).
+    - name: cmake + ninja
+      if: inputs.lang == 'C'
+      uses: lukka/get-cmake@f86dd60acae0d132056913e248bdabf0e0580b7a # v4.4.5
+      with:
+        useLocalCache: false
+        useCloudCache: false
+
+    - name: wire caches
+      shell: bash
+      env:
+        BENCH_LANG: ${{ inputs.lang }}
+        BENCH_SHA: ${{ inputs.sha }}
+        BENCH_TOOLCHAIN: ${{ inputs.toolchain }}
+      run: bash "$GITHUB_WORKSPACE/bench/scripts/env.sh"
+
+    - name: restore cache
+      id: restore
+      if: env.BENCH_MODE == 'warm'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.BENCH_CACHE_PATH }}
+        key: ${{ env.BENCH_CACHE_KEY }}
+
+    - name: remember cache hit
+      if: env.BENCH_MODE == 'warm'
+      shell: bash
+      env:
+        HIT: ${{ steps.restore.outputs.cache-hit }}
+      run: echo "BENCH_CACHE_HIT=${HIT:-false}" >> "$GITHUB_ENV"
+
+    # 2026-11-07 (CMY-99): a warm job with no saved files would time a cold build as
+    # "warm" (run 42221135215: Codemany's Excalidraw warm ran before its refused cold job
+    # was re-run, 55 s vs GitHub's restored 8 s). Fail here instead, before `build`: the
+    # job is red, not a fake number, and a re-run of the cold job re-runs it (bench.yml).
+    - name: require saved files
+      if: env.BENCH_MODE == 'warm' && env.BENCH_CACHE_SCOPE == 'run' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::error::no saved files for $BENCH_CACHE_KEY: this run's cold job did not save them (failed, refused or not run yet). Re-run the failed jobs; the cold job runs first."
+        exit 1
+
+    # 2026-11-02: per-run entries are used once; delete this one now so the next
+    # projects' saves never push an unread entry out of the 10 GB (scripts/env.sh).
+    # A failed delete only warns: bench.yml's plan job sweeps leftovers next run.
+    # 2026-11-07 (CMY-97): on Codemany a 404 is expected (its job cache held the entry).
+    - name: drop used cache entry
+      if: env.BENCH_MODE == 'warm' && env.BENCH_CACHE_SCOPE == 'run' && steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: bash "$GITHUB_WORKSPACE/bench/scripts/drop-cache-entry.sh"
